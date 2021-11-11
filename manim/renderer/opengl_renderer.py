@@ -1,12 +1,12 @@
 import itertools as it
 import time
+from typing import Any
 
 import moderngl
 import numpy as np
 from PIL import Image
 
 from manim import config, logger
-from manim.renderer.cairo_renderer import handle_play_like_call
 from manim.utils.caching import handle_caching_play
 from manim.utils.color import color_to_rgba
 from manim.utils.exceptions import EndSceneEarlyException
@@ -225,6 +225,8 @@ class OpenGLRenderer:
         self._original_skipping_status = skip_animations
         self.skip_animations = skip_animations
         self.animation_start_time = 0
+        self.animation_elapsed_time = 0
+        self.time = 0
         self.animations_hashes = []
         self.num_plays = 0
 
@@ -238,7 +240,7 @@ class OpenGLRenderer:
 
     def init_scene(self, scene):
         self.partial_movie_files = []
-        self.file_writer = self._file_writer_class(
+        self.file_writer: Any = self._file_writer_class(
             self,
             scene.__class__.__name__,
         )
@@ -387,6 +389,9 @@ class OpenGLRenderer:
         the number of animations that need to be played, and
         raises an EndSceneEarlyException if they don't correspond.
         """
+        # there is always at least one section -> no out of bounds here
+        if self.file_writer.sections[-1].skip_animations:
+            self.skip_animations = True
         if (
             config["from_animation_number"]
             and self.num_plays < config["from_animation_number"]
@@ -400,12 +405,18 @@ class OpenGLRenderer:
             raise EndSceneEarlyException()
 
     @handle_caching_play
-    @handle_play_like_call
     def play(self, scene, *args, **kwargs):
         # TODO: Handle data locking / unlocking.
+        self.animation_start_time = time.time()
+        self.file_writer.begin_animation(not self.skip_animations)
+
         if scene.compile_animation_data(*args, **kwargs):
             scene.begin_animations()
             scene.play_internal()
+
+        self.file_writer.end_animation(not self.skip_animations)
+        self.time += scene.duration
+        self.num_plays += 1
 
     def clear_screen(self):
         self.frame_buffer_object.clear(*self.background_color)
